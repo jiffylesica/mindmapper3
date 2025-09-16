@@ -1,0 +1,31 @@
+# Common settings across all phases of project
+
+# Includes: Project metadata, file paths and directories (where to find inputs and store outputs), logging settings, seeds for reproducibility
+
+# Logging levels - debug (very detailed), Info (general info for devs), warning, error, critical
+
+---
+name: "mindmapper2"
+version: "0.1.0"
+
+data:
+  raw_pdfs_dir: "data/raw_pdfs"
+  interim_text: "data/interim_text" 
+  processed: "data/processed_graphs"
+  experiments: "data/experiments"
+
+supported_formats:
+  - "pdf"
+  - "txt"
+
+random_seed: 42
+
+pipeline:
+  batch_size: 32
+  max_workers: 4
+
+logging:
+  # Show INFO level messages and above --> Info, warning, error, critical, but NOT debug (bc too verbose)
+  level: "INFO"
+  # Format of log message - timestamp of when event happened, name of the logger (part of code logging it), log level, and message
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

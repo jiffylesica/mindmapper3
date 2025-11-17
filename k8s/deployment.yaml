@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mindmapper-web
+  labels:
+    app: mindmapper
+spec:
+  # Run 2 copies of your app
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mindmapper
+  template:
+    metadata:
+      labels:
+        app: mindmapper
+    spec:
+      containers:
+      - name: web
+        image: jiffylesica/mindmapper:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: COHERE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mindmapper-secrets
+              key: cohere-api-key
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"

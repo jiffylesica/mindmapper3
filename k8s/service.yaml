@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mindmapper-service
+spec:
+  # Expose to internet (or use ClusterIP for internal)s
+  type: LoadBalancer
+  selector:
+    app: mindmapper
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080

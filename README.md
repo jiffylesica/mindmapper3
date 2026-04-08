@@ -2,6 +2,10 @@
 
 An AI-powered tool to accelerate research workflows by transforming text documents into interactive knowledge maps. The application uses natural language processing (NLP) and machine learning to extract semantic relationships from text, creating visual graph representations that help users explore and understand document structure and key concepts.
 
+**Technologies & Implementation**: Built with **Flask** REST API and **Gunicorn** WSGI server for web interface and processing orchestration. Implemented **Cohere Embed API** (embed-v4.0) for generating 1024-dimensional vector embeddings, **scikit-learn K-Means clustering** for semantic grouping, and **PyVis** for interactive network visualization. Utilized **NLTK** for sentence tokenization and **NumPy** for vector operations. Designed modular pipeline architecture with sequential processing stages (text cleaning → chunking → embedding → clustering → visualization).
+
+**Containerization & Deployment**: Implemented **Docker multi-stage builds** (Python 3.11-slim) with non-root user security practices, reducing image size and optimizing production deployment. Orchestrated with **Kubernetes** manifests including Deployment (2 replicas with resource limits), LoadBalancer Service, ConfigMap for application configuration, and Secrets for API key management. Configured horizontal scaling and resource management for production workloads.
+
 ## Overview
 
 MindMapper processes text documents through a multi-stage pipeline that:

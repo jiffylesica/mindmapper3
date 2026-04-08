@@ -1,26 +1,29 @@
 # MindMapper
 
-An AI-powered tool to accelerate research workflows by transforming text documents into interactive knowledge maps. The application uses natural language processing (NLP) and machine learning to extract semantic relationships from text, creating visual graph representations that help users explore and understand document structure and key concepts.
+An AI-powered tool to accelerate research workflows by transforming text and PDF documents into interactive knowledge maps. The application uses natural language processing (NLP) and machine learning to extract semantic relationships from document content, creating visual graph representations that help users explore and understand document structure and key concepts.
 
-**Technologies & Implementation**: Built with **Flask** REST API and **Gunicorn** WSGI server for web interface and processing orchestration. Implemented **Cohere Embed API** (embed-v4.0) for generating 1024-dimensional vector embeddings, **scikit-learn K-Means clustering** for semantic grouping, and **PyVis** for interactive network visualization. Utilized **NLTK** for sentence tokenization and **NumPy** for vector operations. Designed modular pipeline architecture with sequential processing stages (text cleaning → chunking → embedding → clustering → visualization).
+**Technologies & Implementation**: Built with **Flask** REST API and **Gunicorn** WSGI server for web interface and processing orchestration. Implemented **PyMuPDF** for PDF-to-text extraction, **Cohere Embed API** (embed-v4.0) for generating 1024-dimensional vector embeddings, **Cohere Command** models for cluster theme summarization, **scikit-learn K-Means clustering** for semantic grouping, and **PyVis** for interactive network visualization. Utilized **NLTK** for sentence tokenization and **NumPy** for vector operations. Designed modular pipeline architecture with sequential processing stages (ingestion → cleaning/chunking → embedding → clustering → summarization → visualization).
 
 **Containerization & Deployment**: Implemented **Docker multi-stage builds** (Python 3.11-slim) with non-root user security practices, reducing image size and optimizing production deployment. Orchestrated with **Kubernetes** manifests including Deployment (2 replicas with resource limits), LoadBalancer Service, ConfigMap for application configuration, and Secrets for API key management. Configured horizontal scaling and resource management for production workloads.
 
 ## Overview
 
-MindMapper processes text documents through a multi-stage pipeline that:
-1. **Cleans and chunks** text into semantically meaningful segments
-2. **Embeds** text chunks using Cohere's embedding API to create vector representations
-3. **Clusters** similar chunks using K-Means clustering
-4. **Visualizes** the results as an interactive network graph using PyVis
+MindMapper processes `.txt` and `.pdf` documents through a multi-stage pipeline that:
+1. **Extracts text** from uploaded documents (plain text or PDF)
+2. **Cleans and chunks** text using either fixed-length or hierarchical chunking
+3. **Embeds** text chunks using Cohere's embedding API
+4. **Clusters** similar chunks using K-Means
+5. **Summarizes each cluster theme** with one Cohere chat request
+6. **Visualizes** the results as an interactive network graph using PyVis
 
-The application provides a Flask-based web interface for uploading text files and viewing the generated knowledge maps, with support for containerized deployment using Docker and Kubernetes.
+The application provides a Flask-based web interface for uploading `.txt`/`.pdf` files, selecting chunking strategy, and viewing generated knowledge maps, with support for containerized deployment using Docker and Kubernetes.
 
 ## Key Technologies & Dependencies
 
 ### Core Dependencies
 - **Flask**: Web framework for the REST API and user interface
 - **Cohere**: AI embedding service for generating semantic vector representations
+- **PyMuPDF**: PDF text extraction (`.pdf` ingestion)
 - **scikit-learn**: Machine learning library for K-Means clustering
 - **PyVis**: Interactive network visualization library
 - **NLTK**: Natural language processing for sentence tokenization
@@ -29,22 +32,32 @@ The application provides a Flask-based web interface for uploading text files an
 - **python-dotenv**: Environment variable management
 
 ### Architecture Patterns
-- **Pipeline Pattern**: Modular processing stages (cleaning → embedding → clustering → visualization)
+- **Pipeline Pattern**: Modular processing stages (ingestion → chunking → embedding → clustering → summarization → visualization)
 - **REST API**: Flask-based endpoints for file upload and graph generation
+- **Strategy Pattern (chunking)**: User-selectable fixed-length vs hierarchical chunking
+- **Resilient Fallbacks**: Summary generation falls back safely when API output is unavailable
 - **Containerization**: Docker multi-stage builds for optimized image size
 - **Orchestration**: Kubernetes manifests for scalable deployment
 
 ## Pipeline Processing Logic
 
-The text-to-graph transformation follows a sequential pipeline architecture:
+The document-to-graph transformation follows a sequential pipeline architecture:
+
+### Stage 0: Document Ingestion (`web/app.py` + `extraction/PDFExtractor`)
+- **Input**: Uploaded `.txt` or `.pdf` file
+- **Process**:
+   - Validates file extension (`.txt`, `.pdf`)
+   - For `.txt`: reads file content directly
+   - For `.pdf`: extracts text using PyMuPDF
+- **Output**: Raw text string
 
 ### Stage 1: Text Processing (`TextProcessor`)
 - **Input**: Raw text string
 - **Process**:
-  - Normalizes whitespace (replaces newlines with spaces)
-  - Tokenizes text into sentences using NLTK's `sent_tokenize`
-  - Groups sentences into chunks based on `sent_per_chunk` parameter
-- **Output**: List of text chunks (each chunk contains N sentences)
+   - Supports two chunking strategies:
+      - **Fixed-length**: sentence groups of size `sent_per_chunk`
+      - **Hierarchical**: paragraph-aware chunking with backward merge for short paragraphs and max chunk-size controls
+- **Output**: List of text chunks
 
 ### Stage 2: Chunk Embedding (`ChunkEmbedder`)
 - **Input**: List of text chunks
@@ -62,25 +75,37 @@ The text-to-graph transformation follows a sequential pipeline architecture:
 - **Process**:
   - Applies K-Means clustering algorithm (scikit-learn)
   - Validates cluster count against chunk count
-  - Assigns each chunk to a cluster label
-- **Output**: Cluster labels array (one label per chunk)
+   - Assigns each chunk to a cluster label
+   - Produces collision-safe `ChunkAssignment` records (`chunk_id`, `text`, `cluster_id`)
+- **Output**: Chunk assignment list (one assignment per chunk)
 
-### Stage 4: Graph Visualization (`ChunkGraph`)
-- **Input**: Dictionary mapping chunks to cluster IDs
+### Stage 4: Cluster Theme Summarization (`ClusterSummarizer`)
+- **Input**: Chunks grouped by cluster ID
 - **Process**:
-  - Creates network graph using PyVis
-  - Implements cluster hub architecture:
-    - Each cluster has a central "hub" node (diamond shape)
-    - Chunk nodes connect to their cluster hub
-  - Applies force-directed layout (ForceAtlas2) for optimal positioning
-  - Color-codes nodes by cluster membership
-  - Injects interactive modal for viewing full chunk text on click
+   - Builds one structured prompt containing all clusters
+   - Calls Cohere chat endpoint once
+   - Parses JSON response and maps summaries back to cluster IDs
+   - Applies fallback summary text if response is unavailable/malformed
+- **Output**: Dictionary mapping `cluster_id -> summary`
+
+### Stage 5: Graph Visualization (`ChunkGraph`)
+- **Input**: Chunk assignments + cluster summaries
+- **Process**:
+   - Creates network graph using PyVis
+   - Builds cluster hub architecture:
+      - Each cluster has a central "hub" node (diamond shape)
+      - Chunk nodes connect to their hub
+   - Sets cluster hub popup text to generated summary
+   - Sets chunk node popup text to chunk content
+   - Applies force-directed layout (ForceAtlas2)
+   - Injects interactive modal for click-to-view details
 - **Output**: Interactive HTML graph file
 
 ### Pipeline Flow Diagram
 ```
-Text File → TextProcessor → Chunks → ChunkEmbedder → Embeddings → 
-K-Means Clustering → Cluster Map → ChunkGraph → Interactive HTML Graph
+TXT/PDF Upload → Extraction (if PDF) → TextProcessor (strategy-based chunks) →
+ChunkEmbedder (embeddings + cluster assignments) → ClusterSummarizer (theme summaries) →
+ChunkGraph (hub/chunk nodes with modal popups) → Interactive HTML Graph
 ```
 
 ## Containerization Framework
@@ -172,7 +197,11 @@ The Kubernetes manifests provide a complete deployment setup:
    ```
 
 4. **Access the web interface**:
-   Navigate to `http://localhost:8080` and upload a `.txt` file
+   Navigate to `http://localhost:8080` and upload a `.txt` or `.pdf` file.
+
+5. **Choose chunking strategy in UI**:
+   - Fixed-length chunking with `sentences per chunk`
+   - Hierarchical chunking with `max chunk size`
 
 ### Docker Deployment
 
@@ -210,7 +239,9 @@ mindmapper3/
 ├── src/
 │   └── mindmapper/
 │       ├── cleaning/          # Text processing and chunking
+│       ├── extraction/        # PDF text extraction
 │       ├── embedding/         # Cohere API integration and clustering
+│       ├── summarizing/       # Cluster theme summarization
 │       ├── visualizing/       # Graph generation with PyVis
 │       └── web/               # Flask application
 ├── k8s/                       # Kubernetes manifests
@@ -222,12 +253,15 @@ mindmapper3/
 ## Configuration
 
 ### Environment Variables
-- `COHERE_API_KEY`: Required. Your Cohere API key for embeddings
+- `COHERE_API_KEY`: Required. Your Cohere API key for embeddings and summaries
+- `COHERE_SUMMARY_MODEL`: Optional. Override summary model (default `command-r-08-2024`)
 - `FLASK_ENV`: Flask environment (development/production)
 - `SENT_PER_CHUNK`: Number of sentences per chunk (default: 4)
 - `NUM_CLUSTERS`: Number of clusters for K-Means (default: 3)
 
 ### Pipeline Parameters
 - `sent_per_chunk`: Controls chunk granularity (higher = larger chunks)
+- `chunking_strategy`: `fixed` or `hierarchical`
+- `max_chunk_size`: Maximum sentences per hierarchical chunk (up to 10)
 - `num_clusters`: Controls graph structure (higher = more distinct groups)
 

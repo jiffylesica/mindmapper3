@@ -2,16 +2,20 @@ import json
 from pathlib import Path
 from collections import defaultdict
 from pyvis.network import Network
+from mindmapper.embedding.ChunkEmbedder import ChunkAssignment
+
 
 class ChunkGraph:
-    
+
     def __init__(self, output_dir: Path | None = None, use_cluster_hubs: bool = True):
         self._chunk_map = {}
+        self._chunk_assignments: list[ChunkAssignment] = []
+        self._cluster_summaries: dict[int, str] = {}
         self.net = Network(height="750px", width="100%", bgcolor="#222222", font_color="white")
         self.output_dir = output_dir or Path.cwd() / "generated_graphs"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.use_cluster_hubs = use_cluster_hubs
-    
+
     @property
     def chunk_map(self) -> dict[str, int]:
         return self._chunk_map
@@ -22,46 +26,82 @@ class ChunkGraph:
             raise TypeError("chunk_map must be a dict")
         self._chunk_map = value
 
+    @property
+    def chunk_assignments(self) -> list[ChunkAssignment]:
+        return self._chunk_assignments
+
+    @chunk_assignments.setter
+    def chunk_assignments(self, value: list[ChunkAssignment]) -> None:
+        if not isinstance(value, list):
+            raise TypeError("chunk_assignments must be a list")
+        if any(not isinstance(item, ChunkAssignment) for item in value):
+            raise TypeError("all chunk_assignments entries must be ChunkAssignment")
+        self._chunk_assignments = value
+
+    @property
+    def cluster_summaries(self) -> dict[int, str]:
+        return self._cluster_summaries
+
+    @cluster_summaries.setter
+    def cluster_summaries(self, value: dict[int, str]) -> None:
+        if not isinstance(value, dict):
+            raise TypeError("cluster_summaries must be a dict")
+        self._cluster_summaries = value
+
+    def _get_assignments(self) -> list[ChunkAssignment]:
+        if self.chunk_assignments:
+            return self.chunk_assignments
+        return [
+            ChunkAssignment(chunk_id=index, text=text, cluster_id=int(cluster_id))
+            for index, (text, cluster_id) in enumerate(self.chunk_map.items())
+        ]
+
     def create_graph(self, output_filename: str = "chunk_map.html") -> Path:
         self.net = Network(height="750px", width="100%",
                         bgcolor="#111827", font_color="#f9fafb")
 
+        assignments = self._get_assignments()
+
         if self.use_cluster_hubs:
-            from collections import defaultdict
             clusters = defaultdict(list)
-            for index, (text, cluster_id) in enumerate(self.chunk_map.items()):
-                clusters[cluster_id].append((index, text))
+            for assignment in assignments:
+                clusters[assignment.cluster_id].append(assignment)
 
             for cluster_id, members in clusters.items():
                 hub_id = f"cluster-{cluster_id}-hub"
+                summary = self.cluster_summaries.get(
+                    cluster_id,
+                    f"Cluster {cluster_id}: Summary unavailable.",
+                )
                 self.net.add_node(
                     hub_id,
                     label=f"Cluster {cluster_id}",
+                    title=summary,
                     shape="diamond",
                     size=30,
                     physics=True,
                     color="#fdd835",
                 )
 
-                for index, text in members:
-                    node_id = f"node-{index}"
+                for assignment in members:
+                    node_id = f"node-{assignment.chunk_id}"
                     self.net.add_node(
                         node_id,
-                        label=f"Chunk {index + 1}",
+                        label=f"Chunk {assignment.chunk_id + 1}",
                         group=str(cluster_id),
-                        title=text.strip(),
+                        title=assignment.text.strip(),
                         shape="dot",
                         size=18,
                     )
                     self.net.add_edge(hub_id, node_id, length=150)
         else:
             # fallback: add without hubs but still assign groups
-            for index, (text, cluster_id) in enumerate(self.chunk_map.items()):
+            for assignment in assignments:
                 self.net.add_node(
-                    index,
-                    label=f"Chunk {index + 1}",
-                    group=str(cluster_id),
-                    title=text.strip(),
+                    assignment.chunk_id,
+                    label=f"Chunk {assignment.chunk_id + 1}",
+                    group=str(assignment.cluster_id),
+                    title=assignment.text.strip(),
                     shape="dot",
                     size=18,
                 )
@@ -73,7 +113,8 @@ class ChunkGraph:
         return output_path
 
     def _apply_cluster_layout(self) -> None:
-        unique_clusters = sorted({str(cluster_id) for cluster_id in self.chunk_map.values()})
+        assignments = self._get_assignments()
+        unique_clusters = sorted({str(assignment.cluster_id) for assignment in assignments})
 
         palette = [
             ("#60a5fa", "#1d4ed8"),

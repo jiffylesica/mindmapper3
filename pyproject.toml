@@ -13,6 +13,7 @@ dependencies = [
     "cohere",
     "gunicorn",
     "python-dotenv",
+    "pymupdf",
 ]
 
 [tool.setuptools]

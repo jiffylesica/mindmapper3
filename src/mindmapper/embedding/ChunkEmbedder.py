@@ -1,5 +1,6 @@
 import cohere
 import numpy as np
+from dataclasses import dataclass
 from sklearn.cluster import KMeans
 from utils.env_get_helper import get_env_var
 
@@ -8,6 +9,13 @@ BATCH_SIZE = 96
 MODEL_NAME = "embed-v4.0"
 OUTPUT_DIM = 1024
 EMBED_TYPES = ["float"]
+
+
+@dataclass(frozen=True)
+class ChunkAssignment:
+    chunk_id: int
+    text: str
+    cluster_id: int
 
 class ChunkEmbedder:
     
@@ -88,13 +96,27 @@ class ChunkEmbedder:
 
         return KMeans(n_clusters=num_cluster, random_state=0, n_init="auto").fit(embeddings).labels_
     
-    def map_chunk_clusters(self, clusters, chunks):
+    def map_chunk_clusters(self, clusters, chunks) -> list[ChunkAssignment]:
         # Chunks and labels must align before mapping
         if len(clusters) != len(chunks):
             raise ValueError("Clusters and chunks must align 1:1")
-        return {chunk: cluster for chunk, cluster in zip(chunks, clusters)}
 
-    def build_cluster_map(self, num_cluster):
+        assignments: list[ChunkAssignment] = []
+        for chunk_id, (chunk, cluster_id) in enumerate(zip(chunks, clusters)):
+            assignments.append(
+                ChunkAssignment(
+                    chunk_id=chunk_id,
+                    text=chunk,
+                    cluster_id=int(cluster_id),
+                )
+            )
+        return assignments
+
+    def build_cluster_assignments(self, num_cluster: int) -> list[ChunkAssignment]:
         chunks, embeddings = self.embed_chunks()
         clusters = self.cluster_chunks(embeddings, num_cluster)
         return self.map_chunk_clusters(clusters, chunks)
+
+    def build_cluster_map(self, num_cluster):
+        assignments = self.build_cluster_assignments(num_cluster)
+        return {assignment.text: assignment.cluster_id for assignment in assignments}

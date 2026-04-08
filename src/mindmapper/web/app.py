@@ -5,12 +5,14 @@ from flask import Flask, redirect, render_template, request, flash, url_for, sen
 from werkzeug.utils import secure_filename
 
 from mindmapper.pipeline import TextToGraphPipeline
+from mindmapper.extraction import PDFExtractor
+from mindmapper.cleaning.TextProcessor import CHUNKING_STRATEGY_FIXED, CHUNKING_STRATEGY_HIERARCHICAL
 
 # Load environment variables from .env (must exist at project root)
 load_dotenv()
 
 # Constants
-ALLOWED_EXTENSIONS = {"txt"}
+ALLOWED_EXTENSIONS = {"txt", "pdf"}
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 RESULT_DIR = BASE_DIR / "generated_graphs"
@@ -25,6 +27,7 @@ app.secret_key = "change-me"          # replace with a secure value
 
 # Pipeline (reuse the same instance per process)
 pipeline = TextToGraphPipeline(graph_output_dir=RESULT_DIR)
+pdf_extractor = PDFExtractor()
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -37,24 +40,60 @@ def index():
             flash("Please choose a file before submitting.")
             return redirect(url_for("index"))
         if not allowed_file(file.filename):
-            flash("Only .txt files are supported.")
+            flash("Only .txt and .pdf files are supported.")
             return redirect(url_for("index"))
 
         filename = secure_filename(file.filename)
         saved_path = UPLOAD_DIR / filename
         file.save(saved_path)
 
-        with saved_path.open("r", encoding="utf-8") as f:
-            text = f.read()
+        # Extract text based on file type
+        file_ext = filename.rsplit(".", 1)[1].lower()
+        try:
+            if file_ext == "pdf":
+                text = pdf_extractor.extract_text_from_pdf(saved_path)
+            else:  # txt
+                with saved_path.open("r", encoding="utf-8") as f:
+                    text = f.read()
+        except Exception as exc:
+            flash(f"Failed to read file: {exc}")
+            return redirect(url_for("index"))
 
         try:
             graph_filename = f"{Path(filename).stem}_graph.html"
-            result_path = pipeline.run_pipeline_from_text(
-                text=text,
-                sent_per_chunk=4,
-                num_clusters=3,
-                output_filename=graph_filename,
-            )
+            
+            # Get chunking strategy from form
+            chunking_strategy = request.form.get("chunking_strategy", CHUNKING_STRATEGY_FIXED)
+            
+            # Prepare kwargs for pipeline
+            pipeline_kwargs = {
+                "text": text,
+                "num_clusters": 3,
+                "output_filename": graph_filename,
+                "chunking_strategy": chunking_strategy,
+            }
+            
+            # Add strategy-specific parameters
+            if chunking_strategy == CHUNKING_STRATEGY_HIERARCHICAL:
+                max_chunk_size = request.form.get("max_chunk_size", "10")
+                try:
+                    max_chunk_size = int(max_chunk_size)
+                    if max_chunk_size < 1 or max_chunk_size > 10:
+                        max_chunk_size = 10
+                except (ValueError, TypeError):
+                    max_chunk_size = 10
+                pipeline_kwargs["max_chunk_size"] = max_chunk_size
+            else:
+                sent_per_chunk = request.form.get("sent_per_chunk", "4")
+                try:
+                    sent_per_chunk = int(sent_per_chunk)
+                    if sent_per_chunk <= 0:
+                        sent_per_chunk = 4
+                except (ValueError, TypeError):
+                    sent_per_chunk = 4
+                pipeline_kwargs["sent_per_chunk"] = sent_per_chunk
+            
+            result_path = pipeline.run_pipeline_from_text(**pipeline_kwargs)
         except Exception as exc:
             flash(f"Pipeline failed: {exc}")
             return redirect(url_for("index"))
@@ -79,4 +118,4 @@ def serve_graph(graph_filename: str):
     return send_file(graph_path)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host="localhost", port=8080)

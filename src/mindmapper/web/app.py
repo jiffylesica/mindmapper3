@@ -64,11 +64,20 @@ def index():
             
             # Get chunking strategy from form
             chunking_strategy = request.form.get("chunking_strategy", CHUNKING_STRATEGY_FIXED)
+
+            # Get and validate cluster count from form (allowed range: 2-5)
+            num_clusters_raw = request.form.get("num_clusters", "3")
+            try:
+                num_clusters = int(num_clusters_raw)
+                if num_clusters < 2 or num_clusters > 5:
+                    num_clusters = 3
+            except (ValueError, TypeError):
+                num_clusters = 3
             
             # Prepare kwargs for pipeline
             pipeline_kwargs = {
                 "text": text,
-                "num_clusters": 3,
+                "num_clusters": num_clusters,
                 "output_filename": graph_filename,
                 "chunking_strategy": chunking_strategy,
             }
